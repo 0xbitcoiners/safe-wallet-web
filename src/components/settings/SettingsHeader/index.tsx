@@ -9,12 +9,14 @@ import useSafeAddress from '@/hooks/useSafeAddress'
 const SettingsHeader = (): ReactElement => {
   const safeAddress = useSafeAddress()
 
+  const navItems = safeAddress ? settingsNavItems : generalSettingsNavItems
+
   return (
     <PageHeader
       title={safeAddress ? 'Settings' : 'Preferences'}
       action={
         <div className={css.navWrapper}>
-          <NavTabs tabs={safeAddress ? settingsNavItems : generalSettingsNavItems} />
+          <NavTabs tabs={navItems} />
         </div>
       }
     />

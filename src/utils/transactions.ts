@@ -8,13 +8,16 @@ import type {
   Transaction,
   TransactionDetails,
   TransactionListPage,
+  TransactionSummary,
 } from '@safe-global/safe-gateway-typescript-sdk'
 import { ConflictType, getTransactionDetails, TransactionListItemType } from '@safe-global/safe-gateway-typescript-sdk'
 import {
+  isERC20Transfer,
   isModuleDetailedExecutionInfo,
   isMultisigDetailedExecutionInfo,
   isMultisigExecutionInfo,
   isTransactionListItem,
+  isTransferTxInfo,
   isTxQueued,
 } from './transaction-guards'
 import type { MetaTransactionData } from '@safe-global/safe-core-sdk-types/dist/src/types'
@@ -22,14 +25,15 @@ import { OperationType } from '@safe-global/safe-core-sdk-types/dist/src/types'
 import { getReadOnlyGnosisSafeContract } from '@/services/contracts/safeContracts'
 import extractTxInfo from '@/services/tx/extractTxInfo'
 import type { AdvancedParameters } from '@/components/tx/AdvancedParams'
-import type { TransactionOptions, SafeTransaction } from '@safe-global/safe-core-sdk-types'
+import type { SafeTransaction, TransactionOptions } from '@safe-global/safe-core-sdk-types'
 import { FEATURES, hasFeature } from '@/utils/chains'
 import uniqBy from 'lodash/uniqBy'
 import { Errors, logError } from '@/services/exceptions'
 import { Multi_send__factory } from '@/types/contracts'
-import { ethers } from 'ethers'
+import { toBeHex, AbiCoder } from 'ethers'
 import { type BaseTransaction } from '@safe-global/safe-apps-sdk'
-import { id } from 'ethers/lib/utils'
+import { id } from 'ethers'
+import { isEmptyHexData } from '@/utils/hex'
 
 export const makeTxFromDetails = (txDetails: TransactionDetails): Transaction => {
   const getMissingSigners = ({
@@ -96,13 +100,13 @@ const getSignatures = (confirmations: Record<string, string>) => {
     }, '0x')
 }
 
-export const getMultiSendTxs = (
+export const getMultiSendTxs = async (
   txs: TransactionDetails[],
   chain: ChainInfo,
   safeAddress: string,
   safeVersion: string,
-): MetaTransactionData[] => {
-  const readOnlySafeContract = getReadOnlyGnosisSafeContract(chain, safeVersion)
+): Promise<MetaTransactionData[]> => {
+  const readOnlySafeContract = await getReadOnlyGnosisSafeContract(chain, safeVersion)
 
   return txs
     .map((tx) => {
@@ -178,17 +182,24 @@ export const getQueuedTransactionCount = (txPage?: TransactionListPage): string 
   return queuedTxsByNonce.length.toString()
 }
 
-export const getTxOrigin = (app?: SafeAppData): string | undefined => {
-  if (!app) {
-    return
-  }
+export const getTxOrigin = (app?: Partial<SafeAppData>): string | undefined => {
+  if (!app) return
 
+  const MAX_ORIGIN_LENGTH = 200
+  const { url = '', name = '' } = app
   let origin: string | undefined
 
   try {
-    origin = JSON.stringify({ name: app.name, url: app.url })
+    // Must include empty string to avoid including the length of `undefined`
+    const maxUrlLength = MAX_ORIGIN_LENGTH - JSON.stringify({ url: '', name: '' }).length
+    const trimmedUrl = url.slice(0, maxUrlLength)
+
+    const maxNameLength = Math.max(0, maxUrlLength - trimmedUrl.length)
+    const trimmedName = name.slice(0, maxNameLength)
+
+    origin = JSON.stringify({ url: trimmedUrl, name: trimmedName })
   } catch (e) {
-    logError(Errors._808, (e as Error).message)
+    logError(Errors._808, e)
   }
 
   return origin
@@ -243,10 +254,16 @@ export const decodeMultiSendTxs = (encodedMultiSendData: string): BaseTransactio
     )}`
 
     // Decode operation, to, value, dataLength
-    const [, txTo, txValue, txDataBytesLength] = ethers.utils.defaultAbiCoder.decode(
-      ['uint8', 'address', 'uint256', 'uint256'],
-      ethers.utils.hexZeroPad(txDataEncoded, 32 * 4),
-    )
+    let txTo, txValue, txDataBytesLength
+    try {
+      ;[, txTo, txValue, txDataBytesLength] = AbiCoder.defaultAbiCoder().decode(
+        ['uint8', 'address', 'uint256', 'uint256'],
+        toBeHex(txDataEncoded, 32 * 4),
+      )
+    } catch (e) {
+      logError(Errors._809, e)
+      continue
+    }
 
     // Each byte is represented by two characters
     const dataLength = Number(txDataBytesLength) * 2
@@ -265,4 +282,18 @@ export const decodeMultiSendTxs = (encodedMultiSendData: string): BaseTransactio
   }
 
   return txs
+}
+
+export const isRejectionTx = (tx?: SafeTransaction) => {
+  return !!tx && !!tx.data.data && !!isEmptyHexData(tx.data.data) && tx.data.value === '0'
+}
+
+export const isTrustedTx = (tx: TransactionSummary) => {
+  return (
+    isMultisigExecutionInfo(tx.executionInfo) ||
+    isModuleDetailedExecutionInfo(tx.executionInfo) ||
+    !isTransferTxInfo(tx.txInfo) ||
+    !isERC20Transfer(tx.txInfo.transferInfo) ||
+    Boolean(tx.txInfo.transferInfo.trusted)
+  )
 }

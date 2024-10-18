@@ -1,12 +1,7 @@
-import type { listenerMiddlewareInstance } from '.'
 import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import type { AddressEx, SafeBalanceResponse, SafeInfo } from '@safe-global/safe-gateway-typescript-sdk'
-import { TokenType } from '@safe-global/safe-gateway-typescript-sdk'
+import type { AddressEx, SafeInfo } from '@safe-global/safe-gateway-typescript-sdk'
 import type { RootState } from '.'
-import { selectSafeInfo, safeInfoSlice } from '@/store/safeInfoSlice'
-import { balancesSlice } from './balancesSlice'
-import { safeFormatUnits } from '@/utils/formatters'
-import { migrateAddedSafesOwners } from '@/services/ls-migration/addedSafes'
+import { safeInfoSlice } from '@/store/safeInfoSlice'
 
 export type AddedSafesOnChain = {
   [safeAddress: string]: {
@@ -36,26 +31,6 @@ export const addedSafesSlice = createSlice({
       // Otherwise, migrate
       return action.payload
     },
-    migrateLegacyOwners: (state) => {
-      for (const [chainId, addedSafesOnChain] of Object.entries(state)) {
-        for (const [safeAddress, safe] of Object.entries(addedSafesOnChain)) {
-          // Previously migrated corrupt owners
-          if (safe.owners.some(({ value }) => value !== 'string')) {
-            const migratedOwners = migrateAddedSafesOwners(safe.owners.map(({ value }) => value))
-
-            if (migratedOwners) {
-              state[chainId][safeAddress].owners = migratedOwners
-            } else {
-              delete state[chainId][safeAddress]
-            }
-          }
-        }
-
-        if (Object.keys(state[chainId]).length === 0) {
-          delete state[chainId]
-        }
-      }
-    },
     setAddedSafes: (_, action: PayloadAction<AddedSafesState>) => {
       return action.payload
     },
@@ -68,26 +43,6 @@ export const addedSafesSlice = createSlice({
         ...(state[chainId][address.value] ?? {}),
         owners,
         threshold,
-      }
-    },
-    updateAddedSafeBalance: (
-      state,
-      { payload }: PayloadAction<{ chainId: string; address: string; balances?: SafeBalanceResponse }>,
-    ) => {
-      const { chainId, address, balances } = payload
-
-      if (!balances?.items || !isAddedSafe(state, chainId, address)) {
-        return
-      }
-
-      for (const item of balances.items) {
-        if (item.tokenInfo.type !== TokenType.NATIVE_TOKEN) {
-          continue
-        }
-
-        state[chainId][address].ethBalance = safeFormatUnits(item.balance, item.tokenInfo.decimals)
-
-        return
       }
     },
     removeSafe: (state, { payload }: PayloadAction<{ chainId: string; address: string }>) => {
@@ -118,7 +73,7 @@ export const addedSafesSlice = createSlice({
   },
 })
 
-export const { addOrUpdateSafe, updateAddedSafeBalance, removeSafe } = addedSafesSlice.actions
+export const { addOrUpdateSafe, removeSafe } = addedSafesSlice.actions
 
 export const selectAllAddedSafes = (state: RootState): AddedSafesState => {
   return state[addedSafesSlice.name]
@@ -133,26 +88,6 @@ export const selectTotalAdded = (state: RootState): number => {
 export const selectAddedSafes = createSelector(
   [selectAllAddedSafes, (_: RootState, chainId: string) => chainId],
   (allAddedSafes, chainId): AddedSafesOnChain | undefined => {
-    return allAddedSafes[chainId]
+    return allAddedSafes?.[chainId]
   },
 )
-
-export const addedSafesListener = (listenerMiddleware: typeof listenerMiddlewareInstance) => {
-  listenerMiddleware.startListening({
-    actionCreator: balancesSlice.actions.set,
-    effect: (action, listenerApi) => {
-      if (!action.payload.data) {
-        return
-      }
-
-      const safeInfo = selectSafeInfo(listenerApi.getState())
-
-      const chainId = safeInfo.data?.chainId
-      const address = safeInfo.data?.address.value
-
-      if (chainId && address) {
-        listenerApi.dispatch(updateAddedSafeBalance({ chainId, address, balances: action.payload.data }))
-      }
-    },
-  })
-}

@@ -1,10 +1,18 @@
 import EthHashInfo from '@/components/common/EthHashInfo'
 import useSafeInfo from '@/hooks/useSafeInfo'
-import { Paper, Grid, Typography, Box } from '@mui/material'
+import { Paper, Grid, Typography, Box, IconButton, SvgIcon } from '@mui/material'
 
-import css from './styles.module.css'
-import { RemoveModule } from '@/components/settings/SafeModules/RemoveModule'
 import ExternalLink from '@/components/common/ExternalLink'
+import { RemoveModuleFlow } from '@/components/tx-flow/flows'
+import DeleteIcon from '@/public/images/common/delete.svg'
+import CheckWallet from '@/components/common/CheckWallet'
+import { useContext } from 'react'
+import { TxModalContext } from '@/components/tx-flow'
+import { selectDelayModifierByAddress } from '@/features/recovery/services/selectors'
+import { RemoveRecoveryFlow } from '@/components/tx-flow/flows'
+import useRecovery from '@/features/recovery/hooks/useRecovery'
+
+import css from '../TransactionGuards/styles.module.css'
 
 const NoModules = () => {
   return (
@@ -15,8 +23,20 @@ const NoModules = () => {
 }
 
 const ModuleDisplay = ({ moduleAddress, chainId, name }: { moduleAddress: string; chainId: string; name?: string }) => {
+  const { setTxFlow } = useContext(TxModalContext)
+  const [recovery] = useRecovery()
+  const delayModifier = recovery && selectDelayModifierByAddress(recovery, moduleAddress)
+
+  const onRemove = () => {
+    if (delayModifier) {
+      setTxFlow(<RemoveRecoveryFlow delayModifier={delayModifier} />)
+    } else {
+      setTxFlow(<RemoveModuleFlow address={moduleAddress} />)
+    }
+  }
+
   return (
-    <Box className={css.container}>
+    <Box className={css.guardDisplay}>
       <EthHashInfo
         name={name}
         shortAddress={false}
@@ -25,7 +45,13 @@ const ModuleDisplay = ({ moduleAddress, chainId, name }: { moduleAddress: string
         chainId={chainId}
         hasExplorer
       />
-      <RemoveModule address={moduleAddress} />
+      <CheckWallet>
+        {(isOk) => (
+          <IconButton onClick={onRemove} color="error" size="small" disabled={!isOk} title="Remove module">
+            <SvgIcon component={DeleteIcon} inheritViewBox color="error" fontSize="small" />
+          </IconButton>
+        )}
+      </CheckWallet>
     </Box>
   )
 }
@@ -48,7 +74,7 @@ const SafeModules = () => {
             <Typography>
               Modules allow you to customize the access-control logic of your Safe Account. Modules are potentially
               risky, so make sure to only use modules from trusted sources. Learn more about modules{' '}
-              <ExternalLink href="https://docs.safe.global/contracts/modules-1">here</ExternalLink>
+              <ExternalLink href="https://docs.safe.global/safe-core-protocol/plugins">here</ExternalLink>
             </Typography>
             {safeModules.length === 0 ? (
               <NoModules />

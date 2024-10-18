@@ -1,4 +1,4 @@
-import makeBlockie from 'ethereum-blockies-base64'
+import { blo } from 'blo'
 import type { ChainInfo } from '@safe-global/safe-gateway-typescript-sdk'
 
 import { act, fireEvent, render, waitFor } from '@/tests/test-utils'
@@ -56,7 +56,7 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
+              copy: true,
             },
           },
           chains: {
@@ -76,7 +76,7 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
+              copy: true,
             },
           },
           chains: {
@@ -96,7 +96,7 @@ describe('EthHashInfo', () => {
     it('renders a custom prefix', () => {
       jest.spyOn(store, 'useAppSelector').mockReturnValue({
         shortName: {
-          show: true,
+          copy: true,
         },
       })
 
@@ -113,7 +113,7 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
+              copy: true,
             },
           },
           chains: {
@@ -133,14 +133,8 @@ describe('EthHashInfo', () => {
       expect(result2.queryByText('rin:')).not.toBeInTheDocument()
     })
 
-    it("doesn't render the prefix when disabled in the settings", () => {
-      jest.spyOn(store, 'useAppSelector').mockReturnValue({
-        shortName: {
-          show: false,
-        },
-      })
-
-      const { queryByText } = render(<EthHashInfo address={MOCK_SAFE_ADDRESS} />)
+    it('should not render the prefix when disabled in the props', () => {
+      const { queryByText } = render(<EthHashInfo address={MOCK_SAFE_ADDRESS} showPrefix={false} />)
 
       expect(queryByText('rin:')).not.toBeInTheDocument()
     })
@@ -148,9 +142,15 @@ describe('EthHashInfo', () => {
 
   describe('name', () => {
     it('renders a name by default', () => {
-      const { queryByText } = render(<EthHashInfo address={MOCK_SAFE_ADDRESS} name="Test" />)
+      const { queryByText } = render(<EthHashInfo address="0x1234" name="Test name" />)
 
-      expect(queryByText('Test')).toBeInTheDocument()
+      expect(queryByText('Test name')).toBeInTheDocument()
+    })
+
+    it('renders a name from the address book even if a name is passed', () => {
+      const { queryByText } = render(<EthHashInfo address={MOCK_SAFE_ADDRESS} name="Fallback name" />)
+
+      expect(queryByText('Address book name')).toBeInTheDocument()
     })
 
     it('renders a name from the address book', () => {
@@ -173,7 +173,7 @@ describe('EthHashInfo', () => {
 
       expect(container.querySelector('.icon')).toHaveAttribute(
         'style',
-        `background-image: url(${makeBlockie(MOCK_SAFE_ADDRESS)}); width: 40px; height: 40px;`,
+        `background-image: url(${blo(MOCK_SAFE_ADDRESS)}); width: 40px; height: 40px;`,
       )
     })
 
@@ -182,7 +182,7 @@ describe('EthHashInfo', () => {
 
       expect(container.querySelector('.icon')).toHaveAttribute(
         'style',
-        `background-image: url(${makeBlockie(MOCK_SAFE_ADDRESS)}); width: 100px; height: 100px;`,
+        `background-image: url(${blo(MOCK_SAFE_ADDRESS)}); width: 100px; height: 100px;`,
       )
     })
 
@@ -240,7 +240,6 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
               copy: true,
             },
           },
@@ -273,7 +272,6 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
               copy: true,
             },
           },
@@ -302,7 +300,6 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
               copy: true,
             },
           },
@@ -333,7 +330,6 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
               copy: true,
             },
           },
@@ -363,7 +359,6 @@ describe('EthHashInfo', () => {
           session: {},
           settings: {
             shortName: {
-              show: true,
               copy: false,
             },
           },

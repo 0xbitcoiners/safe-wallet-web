@@ -5,17 +5,17 @@ import { Errors, logError } from '@/services/exceptions'
 import type { SpendingLimitState } from '@/store/spendingLimitsSlice'
 import useChainId from '@/hooks/useChainId'
 import { useWeb3ReadOnly } from '@/hooks/wallets/web3'
-import type { JsonRpcProvider } from '@ethersproject/providers'
+import type { JsonRpcProvider } from 'ethers'
 import { getSpendingLimitContract, getSpendingLimitModuleAddress } from '@/services/contracts/spendingLimitContracts'
 import type { AddressEx, TokenInfo } from '@safe-global/safe-gateway-typescript-sdk'
 import { sameAddress } from '@/utils/addresses'
 import { type AllowanceModule } from '@/types/contracts'
 import { getERC20TokenInfoOnChain } from '@/utils/tokens'
 
-import { sameString } from '@safe-global/safe-core-sdk/dist/src/utils'
+import { sameString } from '@safe-global/protocol-kit/dist/src/utils'
 import { useAppSelector } from '@/store'
 import { selectTokens } from '@/store/balancesSlice'
-import { isEqual } from 'lodash'
+import isEqual from 'lodash/isEqual'
 
 const DEFAULT_TOKEN_INFO = {
   decimals: 18,
@@ -101,11 +101,17 @@ export const useLoadSpendingLimits = (): AsyncResult<SpendingLimitState[]> => {
   const provider = useWeb3ReadOnly()
   const tokenInfoFromBalances = useAppSelector(selectTokens, isEqual)
 
-  const [data, error, loading] = useAsync<SpendingLimitState[] | undefined>(() => {
-    if (!provider || !safeLoaded || !safe.modules || !tokenInfoFromBalances) return
+  const [data, error, loading] = useAsync<SpendingLimitState[] | undefined>(
+    () => {
+      if (!provider || !safeLoaded || !safe.modules || !tokenInfoFromBalances) return
 
-    return getSpendingLimits(provider, safe.modules, safeAddress, chainId, tokenInfoFromBalances)
-  }, [provider, safeLoaded, safe.modules?.length, safeAddress, chainId, safe.txHistoryTag, tokenInfoFromBalances])
+      return getSpendingLimits(provider, safe.modules, safeAddress, chainId, tokenInfoFromBalances)
+    },
+    // Need to check length of modules array to prevent new request every time Safe info polls
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [provider, safeLoaded, safe.modules?.length, tokenInfoFromBalances, safeAddress, chainId, safe.txHistoryTag],
+    false,
+  )
 
   useEffect(() => {
     if (error) {

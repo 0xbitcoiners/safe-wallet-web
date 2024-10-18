@@ -11,7 +11,13 @@ import {
 import type { SecurityResponse } from '@/services/security/modules/types'
 import { FEATURES } from '@/utils/chains'
 import type { SafeTransaction } from '@safe-global/safe-core-sdk-types'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, type ComponentType } from 'react'
+import { type AlertColor } from '@mui/material'
+import { SecuritySeverity } from '@/services/security/modules/types'
+import CloseIcon from '@/public/images/common/close.svg'
+import InfoIcon from '@/public/images/notifications/info.svg'
+import CheckIcon from '@/public/images/common/check.svg'
+import type { EIP712TypedData } from '@safe-global/safe-gateway-typescript-sdk'
 
 export const REDEFINE_RETRY_TIMEOUT = 2_000
 const RedefineModuleInstance = new RedefineModule()
@@ -24,8 +30,50 @@ const CRITICAL_ERRORS: Record<number, string> = {
   [3000]: DEFAULT_ERROR_MESSAGE,
 }
 
+type SecurityWarningProps = {
+  color: AlertColor
+  icon: ComponentType
+  label: string
+  action?: string
+}
+
+const ACTION_REJECT = 'Reject this transaction'
+const ACTION_REVIEW = 'Review before processing'
+
+export const mapRedefineSeverity: Record<SecuritySeverity, SecurityWarningProps> = {
+  [SecuritySeverity.CRITICAL]: {
+    action: ACTION_REJECT,
+    color: 'error',
+    icon: CloseIcon,
+    label: 'critical risk',
+  },
+  [SecuritySeverity.HIGH]: {
+    action: ACTION_REJECT,
+    color: 'error',
+    icon: CloseIcon,
+    label: 'high risk',
+  },
+  [SecuritySeverity.MEDIUM]: {
+    action: ACTION_REVIEW,
+    color: 'warning',
+    icon: InfoIcon,
+    label: 'medium risk',
+  },
+  [SecuritySeverity.LOW]: {
+    action: ACTION_REVIEW,
+    color: 'warning',
+    icon: InfoIcon,
+    label: 'small risk',
+  },
+  [SecuritySeverity.NONE]: {
+    color: 'success',
+    icon: CheckIcon,
+    label: 'No issues found',
+  },
+}
+
 export const useRedefine = (
-  safeTransaction: SafeTransaction | undefined,
+  data: SafeTransaction | EIP712TypedData | undefined,
 ): AsyncResult<SecurityResponse<RedefineModuleResponse>> => {
   const { safe, safeAddress } = useSafeInfo()
   const wallet = useWallet()
@@ -34,19 +82,20 @@ export const useRedefine = (
 
   const [redefinePayload, redefineErrors, redefineLoading] = useAsync<SecurityResponse<RedefineModuleResponse>>(
     () => {
-      if (!isFeatureEnabled || !safeTransaction || !wallet?.address) {
+      if (!isFeatureEnabled || !data || !wallet?.address) {
         return
       }
 
       return RedefineModuleInstance.scanTransaction({
         chainId: Number(safe.chainId),
-        safeTransaction,
+        data,
         safeAddress,
         walletAddress: wallet.address,
         threshold: safe.threshold,
       })
     },
-    [safe.chainId, safe.threshold, safeAddress, safeTransaction, wallet?.address, retryCounter],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [safe.chainId, safe.threshold, safeAddress, data, wallet?.address, retryCounter, isFeatureEnabled],
     false,
   )
 

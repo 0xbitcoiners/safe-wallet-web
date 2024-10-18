@@ -1,6 +1,6 @@
-import { ZERO_ADDRESS } from '@safe-global/safe-core-sdk/dist/src/utils/constants'
-import { ethers } from 'ethers'
-import { OperationType } from '@safe-global/safe-core-sdk-types'
+import { ZERO_ADDRESS } from '@safe-global/protocol-kit/dist/src/utils/constants'
+import { solidityPacked, concat } from 'ethers'
+import { OperationType, type SafeSignature } from '@safe-global/safe-core-sdk-types'
 import type { SafeTransaction } from '@safe-global/safe-core-sdk-types'
 
 import { ERC20__factory, ERC721__factory, Multi_send__factory } from '@/types/contracts'
@@ -48,7 +48,7 @@ export const getMockMultiSendCalldata = (recipients: Array<string>): string => {
   const data = '0x'
 
   const internalTransactions = recipients.map((recipient) => {
-    return ethers.utils.solidityPack(
+    return solidityPacked(
       ['uint8', 'address', 'uint256', 'uint256', 'bytes'],
       [
         OPERATION,
@@ -61,9 +61,10 @@ export const getMockMultiSendCalldata = (recipients: Array<string>): string => {
   })
 
   const multiSendInterface = Multi_send__factory.createInterface()
-  return multiSendInterface.encodeFunctionData('multiSend', [ethers.utils.concat(internalTransactions)])
+  return multiSendInterface.encodeFunctionData('multiSend', [concat(internalTransactions)])
 }
 
+// TODO: Replace with safeTxBuilder
 export const createMockSafeTransaction = ({
   to,
   data,
@@ -73,25 +74,28 @@ export const createMockSafeTransaction = ({
   data: string
   operation?: OperationType
 }): SafeTransaction => {
+  const signatures = new Map<string, SafeSignature>([])
+
   return {
     data: {
       to,
       data,
-      baseGas: 0,
-      gasPrice: 0,
+      baseGas: '0',
+      gasPrice: '0',
       gasToken: ZERO_ADDRESS,
       nonce: 1,
       operation,
       refundReceiver: ZERO_ADDRESS,
-      safeTxGas: 0,
+      safeTxGas: '0',
       value: '0x0',
     },
-    signatures: new Map(),
-    addSignature: () => {
-      throw new Error('Function not implemented.')
+    signatures,
+    addSignature: (sig: SafeSignature) => {
+      signatures.set(sig.signer, sig)
     },
     encodedSignatures: () => {
-      throw new Error('Function not implemented.')
+      return '0x'
     },
+    getSignature: (signer: string) => signatures.get(signer),
   }
 }

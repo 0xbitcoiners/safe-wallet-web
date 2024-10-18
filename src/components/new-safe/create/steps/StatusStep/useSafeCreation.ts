@@ -4,7 +4,7 @@ import { useWeb3, useWeb3ReadOnly } from '@/hooks/wallets/web3'
 import { useCurrentChain } from '@/hooks/useChains'
 import useWallet from '@/hooks/wallets/useWallet'
 import type { EthersError } from '@/utils/ethers-utils'
-import { getInitialCreationStatus, type PendingSafeData } from '@/components/new-safe/create/steps/StatusStep/index'
+import { getInitialCreationStatus } from '@/components/new-safe/create/steps/StatusStep/index'
 import type { PendingSafeTx } from '@/components/new-safe/create/types'
 import {
   createNewSafe,
@@ -15,11 +15,17 @@ import {
   SAFE_CREATION_ERROR_KEY,
   showSafeCreationError,
   relaySafeCreation,
+  estimateSafeCreationGas,
 } from '@/components/new-safe/create/logic'
 import { useAppDispatch } from '@/store'
 import { closeByGroupKey } from '@/store/notificationsSlice'
 import { CREATE_SAFE_EVENTS, trackEvent } from '@/services/analytics'
 import { waitForCreateSafeTx } from '@/services/tx/txMonitor'
+import useGasPrice from '@/hooks/useGasPrice'
+import { hasFeature } from '@/utils/chains'
+import { FEATURES } from '@safe-global/safe-gateway-typescript-sdk'
+import type { DeploySafeProps } from '@safe-global/protocol-kit'
+import { usePendingSafe } from './usePendingSafe'
 
 export enum SafeCreationStatus {
   AWAITING,
@@ -34,8 +40,6 @@ export enum SafeCreationStatus {
 }
 
 export const useSafeCreation = (
-  pendingSafe: PendingSafeData | undefined,
-  setPendingSafe: Dispatch<SetStateAction<PendingSafeData | undefined>>,
   status: SafeCreationStatus,
   setStatus: Dispatch<SetStateAction<SafeCreationStatus>>,
   willRelay: boolean,
@@ -43,23 +47,30 @@ export const useSafeCreation = (
   const [isCreating, setIsCreating] = useState(false)
   const [isWatching, setIsWatching] = useState(false)
   const dispatch = useAppDispatch()
+  const [pendingSafe, setPendingSafe] = usePendingSafe()
 
   const wallet = useWallet()
   const provider = useWeb3()
   const web3ReadOnly = useWeb3ReadOnly()
   const chain = useCurrentChain()
+  const [gasPrice, , gasPriceLoading] = useGasPrice()
+
+  const maxFeePerGas = gasPrice?.maxFeePerGas
+  const maxPriorityFeePerGas = gasPrice?.maxPriorityFeePerGas
+
+  const isEIP1559 = chain && hasFeature(chain, FEATURES.EIP1559)
 
   const createSafeCallback = useCallback(
     async (txHash: string, tx: PendingSafeTx) => {
       setStatus(SafeCreationStatus.PROCESSING)
       trackEvent(CREATE_SAFE_EVENTS.SUBMIT_CREATE_SAFE)
-      setPendingSafe((prev) => (prev ? { ...prev, txHash, tx } : undefined))
+      setPendingSafe(pendingSafe ? { ...pendingSafe, txHash, tx } : undefined)
     },
-    [setStatus, setPendingSafe],
+    [setStatus, setPendingSafe, pendingSafe],
   )
 
   const handleCreateSafe = useCallback(async () => {
-    if (!pendingSafe || !provider || !chain || !wallet || isCreating) return
+    if (!pendingSafe || !provider || !chain || !wallet || isCreating || gasPriceLoading) return
 
     setIsCreating(true)
     dispatch(closeByGroupKey({ groupKey: SAFE_CREATION_ERROR_KEY }))
@@ -71,23 +82,38 @@ export const useSafeCreation = (
       if (willRelay) {
         const taskId = await relaySafeCreation(chain, ownersAddresses, threshold, saltNonce)
 
-        setPendingSafe((prev) => (prev ? { ...prev, taskId } : undefined))
+        setPendingSafe(pendingSafe ? { ...pendingSafe, taskId } : undefined)
         setStatus(SafeCreationStatus.PROCESSING)
         waitForCreateSafeTx(taskId, setStatus)
       } else {
         const tx = await getSafeCreationTxInfo(provider, owners, threshold, saltNonce, chain, wallet)
 
-        const safeParams = getSafeDeployProps(
-          {
-            threshold,
-            owners: owners.map((owner) => owner.address),
-            saltNonce,
-          },
+        const safeParams = {
+          threshold,
+          owners: owners.map((owner) => owner.address),
+          saltNonce,
+        }
+
+        const safeDeployProps = await getSafeDeployProps(
+          safeParams,
           (txHash) => createSafeCallback(txHash, tx),
           chain.chainId,
         )
 
-        await createNewSafe(provider, safeParams)
+        const gasLimit = await estimateSafeCreationGas(chain, provider, tx.from, safeParams)
+
+        const options: DeploySafeProps['options'] = isEIP1559
+          ? {
+              maxFeePerGas: maxFeePerGas?.toString(),
+              maxPriorityFeePerGas: maxPriorityFeePerGas?.toString(),
+              gasLimit: gasLimit.toString(),
+            }
+          : { gasPrice: maxFeePerGas?.toString(), gasLimit: gasLimit.toString() }
+
+        await createNewSafe(provider, {
+          ...safeDeployProps,
+          options,
+        })
         setStatus(SafeCreationStatus.SUCCESS)
       }
     } catch (err) {
@@ -106,7 +132,11 @@ export const useSafeCreation = (
     chain,
     createSafeCallback,
     dispatch,
+    gasPriceLoading,
     isCreating,
+    isEIP1559,
+    maxFeePerGas,
+    maxPriorityFeePerGas,
     pendingSafe,
     provider,
     setPendingSafe,

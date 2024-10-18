@@ -2,14 +2,14 @@ import type { SafeInfo, TransactionDetails } from '@safe-global/safe-gateway-typ
 import type { SafeTransaction, TransactionOptions, TransactionResult } from '@safe-global/safe-core-sdk-types'
 import type { EthersError } from '@/utils/ethers-utils'
 import { didReprice, didRevert } from '@/utils/ethers-utils'
-import type MultiSendCallOnlyEthersContract from '@safe-global/safe-ethers-lib/dist/src/contracts/MultiSendCallOnly/MultiSendCallOnlyEthersContract'
-import type { SpendingLimitTxParams } from '@/components/tx/modals/TokenTransferModal/ReviewSpendingLimitTx'
+import type { MultiSendCallOnlyEthersContract } from '@safe-global/protocol-kit'
+import { type SpendingLimitTxParams } from '@/components/tx-flow/flows/TokenTransfer/ReviewSpendingLimitTx'
 import { getSpendingLimitContract } from '@/services/contracts/spendingLimitContracts'
-import type { ContractTransaction } from 'ethers'
+import type { ContractTransactionResponse, Overrides } from 'ethers'
 import type { RequestId } from '@safe-global/safe-apps-sdk'
 import proposeTx from '../proposeTransaction'
 import { txDispatch, TxEvent } from '../txEvents'
-import { waitForRelayedTx } from '@/services/tx/txMonitor'
+import { waitForRelayedTx, waitForTx } from '@/services/tx/txMonitor'
 import { getReadOnlyCurrentGnosisSafeContract } from '@/services/contracts/safeContracts'
 import { sponsoredCall } from '@/services/tx/relaying'
 import {
@@ -19,8 +19,9 @@ import {
   assertWalletChain,
   tryOffChainTxSigning,
 } from './sdk'
-import { createWeb3 } from '@/hooks/wallets/web3'
+import { createWeb3, getWeb3ReadOnly } from '@/hooks/wallets/web3'
 import { type OnboardAPI } from '@web3-onboard/core'
+import { asError } from '@/services/exceptions/utils'
 
 /**
  * Propose a transaction
@@ -49,17 +50,21 @@ export const dispatchTxProposal = async ({
     proposedTx = await proposeTx(chainId, safeAddress, sender, safeTx, safeTxHash, origin)
   } catch (error) {
     if (txId) {
-      txDispatch(TxEvent.SIGNATURE_PROPOSE_FAILED, { txId, error: error as Error })
+      txDispatch(TxEvent.SIGNATURE_PROPOSE_FAILED, { txId, error: asError(error) })
     } else {
-      txDispatch(TxEvent.PROPOSE_FAILED, { error: error as Error })
+      txDispatch(TxEvent.PROPOSE_FAILED, { error: asError(error) })
     }
     throw error
   }
 
-  txDispatch(txId ? TxEvent.SIGNATURE_PROPOSED : TxEvent.PROPOSED, {
-    txId: proposedTx.txId,
-    signerAddress: txId ? sender : undefined,
-  })
+  // Dispatch a success event only if the tx is signed
+  // Unsigned txs are proposed only temporarily and won't appear in the queue
+  if (safeTx.signatures.size > 0) {
+    txDispatch(txId ? TxEvent.SIGNATURE_PROPOSED : TxEvent.PROPOSED, {
+      txId: proposedTx.txId,
+      signerAddress: txId ? sender : undefined,
+    })
+  }
 
   return proposedTx
 }
@@ -80,7 +85,10 @@ export const dispatchTxSigning = async (
   try {
     signedTx = await tryOffChainTxSigning(safeTx, safeVersion, sdk)
   } catch (error) {
-    txDispatch(TxEvent.SIGN_FAILED, { txId, error: error as Error })
+    txDispatch(TxEvent.SIGN_FAILED, {
+      txId,
+      error: asError(error),
+    })
     throw error
   }
 
@@ -108,7 +116,7 @@ export const dispatchOnChainSigning = async (
     await sdkUnchecked.approveTransactionHash(safeTxHash)
     txDispatch(TxEvent.ONCHAIN_SIGNATURE_REQUESTED, eventParams)
   } catch (err) {
-    txDispatch(TxEvent.FAILED, { ...eventParams, error: err as Error })
+    txDispatch(TxEvent.FAILED, { ...eventParams, error: asError(err) })
     throw err
   }
 
@@ -138,31 +146,38 @@ export const dispatchTxExecution = async (
     result = await sdkUnchecked.executeTransaction(safeTx, txOptions)
     txDispatch(TxEvent.EXECUTING, eventParams)
   } catch (error) {
-    txDispatch(TxEvent.FAILED, { ...eventParams, error: error as Error })
+    txDispatch(TxEvent.FAILED, { ...eventParams, error: asError(error) })
     throw error
   }
 
   txDispatch(TxEvent.PROCESSING, { ...eventParams, txHash: result.hash })
 
-  // Asynchronously watch the tx to be mined/validated
-  result.transactionResponse
-    ?.wait()
-    .then((receipt) => {
-      if (didRevert(receipt)) {
-        txDispatch(TxEvent.REVERTED, { ...eventParams, error: new Error('Transaction reverted by EVM') })
-      } else {
-        txDispatch(TxEvent.PROCESSED, { ...eventParams, safeAddress })
-      }
-    })
-    .catch((err) => {
-      const error = err as EthersError
+  const provider = getWeb3ReadOnly()
 
-      if (didReprice(error)) {
-        txDispatch(TxEvent.PROCESSED, { ...eventParams, safeAddress })
-      } else {
-        txDispatch(TxEvent.FAILED, { ...eventParams, error: error as Error })
-      }
-    })
+  // Asynchronously watch the tx to be mined/validated
+  Promise.race([
+    result.transactionResponse
+      ?.wait()
+      .then((receipt) => {
+        if (receipt === null) {
+          txDispatch(TxEvent.FAILED, { ...eventParams, error: new Error('No transaction receipt found') })
+        } else if (didRevert(receipt)) {
+          txDispatch(TxEvent.REVERTED, { ...eventParams, error: new Error('Transaction reverted by EVM') })
+        } else {
+          txDispatch(TxEvent.PROCESSED, { ...eventParams, safeAddress })
+        }
+      })
+      .catch((err) => {
+        const error = err as EthersError
+
+        if (didReprice(error)) {
+          txDispatch(TxEvent.PROCESSED, { ...eventParams, safeAddress })
+        } else {
+          txDispatch(TxEvent.FAILED, { ...eventParams, error: asError(error) })
+        }
+      }),
+    provider ? waitForTx(provider, [txId], result.hash) : undefined,
+  ])
 
   return result.hash
 }
@@ -174,68 +189,87 @@ export const dispatchBatchExecution = async (
   onboard: OnboardAPI,
   chainId: SafeInfo['chainId'],
   safeAddress: string,
+  overrides: Overrides,
 ) => {
   const groupKey = multiSendTxData
 
   let result: TransactionResult | undefined
+  const txIds = txs.map((tx) => tx.txId)
 
   try {
     const wallet = await assertWalletChain(onboard, chainId)
 
     const provider = createWeb3(wallet.provider)
-    result = await multiSendContract.contract.connect(provider.getSigner()).multiSend(multiSendTxData)
-    txs.forEach(({ txId }) => {
+    result = await multiSendContract.contract.connect(await provider.getSigner()).multiSend(multiSendTxData, overrides)
+
+    txIds.forEach((txId) => {
       txDispatch(TxEvent.EXECUTING, { txId, groupKey })
     })
   } catch (err) {
-    txs.forEach(({ txId }) => {
-      txDispatch(TxEvent.FAILED, { txId, error: err as Error, groupKey })
+    txIds.forEach((txId) => {
+      txDispatch(TxEvent.FAILED, { txId, error: asError(err), groupKey })
     })
     throw err
   }
 
-  txs.forEach(({ txId }) => {
+  txIds.forEach((txId) => {
     txDispatch(TxEvent.PROCESSING, { txId, txHash: result!.hash, groupKey })
   })
 
-  result!.transactionResponse
-    ?.wait()
-    .then((receipt) => {
-      if (didRevert(receipt)) {
-        txs.forEach(({ txId }) => {
-          txDispatch(TxEvent.REVERTED, {
-            txId,
-            error: new Error('Transaction reverted by EVM'),
-            groupKey,
-          })
-        })
-      } else {
-        txs.forEach(({ txId }) => {
-          txDispatch(TxEvent.PROCESSED, {
-            txId,
-            groupKey,
-            safeAddress,
-          })
-        })
-      }
-    })
-    .catch((err) => {
-      const error = err as EthersError
+  const provider = getWeb3ReadOnly()
 
-      if (didReprice(error)) {
-        txs.forEach(({ txId }) => {
-          txDispatch(TxEvent.PROCESSED, { txId, safeAddress })
-        })
-      } else {
-        txs.forEach(({ txId }) => {
-          txDispatch(TxEvent.FAILED, {
-            txId,
-            error: err as Error,
-            groupKey,
+  Promise.race([
+    result.transactionResponse
+      ?.wait()
+      .then((receipt) => {
+        if (receipt === null) {
+          txs.forEach(({ txId }) => {
+            txDispatch(TxEvent.FAILED, {
+              txId,
+              error: new Error('No transaction receipt found'),
+              groupKey,
+            })
           })
-        })
-      }
-    })
+        } else if (didRevert(receipt)) {
+          txIds.forEach((txId) => {
+            txDispatch(TxEvent.REVERTED, {
+              txId,
+              error: new Error('Transaction reverted by EVM'),
+              groupKey,
+            })
+          })
+        } else {
+          txIds.forEach((txId) => {
+            txDispatch(TxEvent.PROCESSED, {
+              txId,
+              groupKey,
+              safeAddress,
+            })
+          })
+        }
+      })
+      .catch((err) => {
+        const error = err as EthersError
+
+        if (didReprice(error)) {
+          txIds.forEach((txId) => {
+            txDispatch(TxEvent.PROCESSED, {
+              txId,
+              safeAddress,
+            })
+          })
+        } else {
+          txIds.forEach((txId) => {
+            txDispatch(TxEvent.FAILED, {
+              txId,
+              error: asError(err),
+              groupKey,
+            })
+          })
+        }
+      }),
+    provider ? waitForTx(provider, txIds, result.hash) : undefined,
+  ])
 
   return result!.hash
 }
@@ -249,11 +283,11 @@ export const dispatchSpendingLimitTxExecution = async (
 ) => {
   const id = JSON.stringify(txParams)
 
-  let result: ContractTransaction | undefined
+  let result: ContractTransactionResponse | undefined
   try {
     const wallet = await assertWalletChain(onboard, chainId)
     const provider = createWeb3(wallet.provider)
-    const contract = getSpendingLimitContract(chainId, provider.getSigner())
+    const contract = getSpendingLimitContract(chainId, await provider.getSigner())
 
     result = await contract.executeAllowanceTransfer(
       txParams.safeAddress,
@@ -268,7 +302,7 @@ export const dispatchSpendingLimitTxExecution = async (
     )
     txDispatch(TxEvent.EXECUTING, { groupKey: id })
   } catch (error) {
-    txDispatch(TxEvent.FAILED, { groupKey: id, error: error as Error })
+    txDispatch(TxEvent.FAILED, { groupKey: id, error: asError(error) })
     throw error
   }
 
@@ -280,14 +314,19 @@ export const dispatchSpendingLimitTxExecution = async (
   result
     ?.wait()
     .then((receipt) => {
-      if (didRevert(receipt)) {
-        txDispatch(TxEvent.REVERTED, { groupKey: id, error: new Error('Transaction reverted by EVM') })
+      if (receipt === null) {
+        txDispatch(TxEvent.FAILED, { groupKey: id, error: new Error('No transaction receipt found') })
+      } else if (didRevert(receipt)) {
+        txDispatch(TxEvent.REVERTED, {
+          groupKey: id,
+          error: new Error('Transaction reverted by EVM'),
+        })
       } else {
         txDispatch(TxEvent.PROCESSED, { groupKey: id, safeAddress })
       }
     })
     .catch((error) => {
-      txDispatch(TxEvent.FAILED, { groupKey: id, error: error as Error })
+      txDispatch(TxEvent.FAILED, { groupKey: id, error: asError(error) })
     })
 
   return result?.hash
@@ -298,10 +337,12 @@ export const dispatchSafeAppsTx = async (
   safeAppRequestId: RequestId,
   onboard: OnboardAPI,
   chainId: SafeInfo['chainId'],
-) => {
+  txId?: string,
+): Promise<string> => {
   const sdk = await getSafeSDKWithSigner(onboard, chainId)
   const safeTxHash = await sdk.getTransactionHash(safeTx)
-  txDispatch(TxEvent.SAFE_APPS_REQUEST, { safeAppRequestId, safeTxHash })
+  txDispatch(TxEvent.SAFE_APPS_REQUEST, { safeAppRequestId, safeTxHash, txId })
+  return safeTxHash
 }
 
 export const dispatchTxRelay = async (
@@ -310,7 +351,7 @@ export const dispatchTxRelay = async (
   txId: string,
   gasLimit?: string | number,
 ) => {
-  const readOnlySafeContract = getReadOnlyCurrentGnosisSafeContract(safe)
+  const readOnlySafeContract = await getReadOnlyCurrentGnosisSafeContract(safe)
 
   let transactionToRelay = safeTx
   const data = readOnlySafeContract.encode('execTransaction', [
@@ -339,7 +380,7 @@ export const dispatchTxRelay = async (
     // Monitor relay tx
     waitForRelayedTx(taskId, [txId], safe.address.value)
   } catch (error) {
-    txDispatch(TxEvent.FAILED, { txId, error: error as Error })
+    txDispatch(TxEvent.FAILED, { txId, error: asError(error) })
     throw error
   }
 }
@@ -351,7 +392,7 @@ export const dispatchBatchExecutionRelay = async (
   chainId: string,
   safeAddress: string,
 ) => {
-  const to = multiSendContract.getAddress()
+  const to = await multiSendContract.getAddress()
   const data = multiSendContract.contract.interface.encodeFunctionData('multiSend', [multiSendTxData])
   const groupKey = multiSendTxData
 
@@ -366,7 +407,7 @@ export const dispatchBatchExecutionRelay = async (
     txs.forEach(({ txId }) => {
       txDispatch(TxEvent.FAILED, {
         txId,
-        error: error as Error,
+        error: asError(error),
         groupKey,
       })
     })

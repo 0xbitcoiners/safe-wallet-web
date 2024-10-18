@@ -1,106 +1,84 @@
-import TokenIcon from '@/components/common/TokenIcon'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-
-import { Accordion, AccordionDetails, AccordionSummary, Box, IconButton, Skeleton, Typography } from '@mui/material'
-import { groupBy } from 'lodash'
+import { SafeTxContext } from '@/components/tx-flow/SafeTxProvider'
+import { createMultiSendCallOnlyTx, createTx } from '@/services/tx/tx-sender'
+import { Alert, Box, Divider, Skeleton, SvgIcon, Typography } from '@mui/material'
+import { type SafeTransaction } from '@safe-global/safe-core-sdk-types'
+import { useContext } from 'react'
 import css from './styles.module.css'
-import { UNLIMITED_APPROVAL_AMOUNT } from '@/utils/tokens'
 import { ApprovalEditorForm } from './ApprovalEditorForm'
-import { type ReactNode } from 'react'
-import { type ApprovalInfo, updateApprovalTxs } from './utils/approvals'
+import { updateApprovalTxs } from './utils/approvals'
 import { useApprovalInfos } from './hooks/useApprovalInfos'
 import { decodeSafeTxToBaseTransactions } from '@/utils/transactions'
-import { type MetaTransactionData, type SafeTransaction } from '@safe-global/safe-core-sdk-types'
+import EditIcon from '@/public/images/common/edit.svg'
+import commonCss from '@/components/tx-flow/common/styles.module.css'
+import Approvals from '@/components/tx/ApprovalEditor/Approvals'
+import { type EIP712TypedData } from '@safe-global/safe-gateway-typescript-sdk'
 
-const SummaryWrapper = ({ children }: { children: ReactNode | ReactNode[] }) => {
+const Title = () => {
   return (
-    <Box display="flex" flexDirection="row" justifyContent="space-between" width="100%">
-      <Typography fontWeight={700} display="inline-flex" alignItems="center" gap={1}>
-        Approve access to
-      </Typography>
-      <Typography display="inline-flex" alignItems="center" gap={1} color="warning.main">
-        {children}
-      </Typography>
-    </Box>
-  )
-}
-
-const Summary = ({ approvalInfos }: { approvalInfos: ApprovalInfo[] }) => {
-  const uniqueTokens = groupBy(approvalInfos, (approvalInfo) => approvalInfo.tokenAddress)
-  const uniqueTokenCount = Object.keys(uniqueTokens).length
-
-  if (approvalInfos.length === 1) {
-    const approval = approvalInfos[0]
-    const amount = UNLIMITED_APPROVAL_AMOUNT.eq(approval.amount) ? 'unlimited' : approval.amountFormatted
-    return (
-      <SummaryWrapper>
-        {amount}
-        <TokenIcon logoUri={approval.tokenInfo?.logoUri} tokenSymbol={approval.tokenInfo?.symbol} />
-        {approval.tokenInfo?.symbol}
-      </SummaryWrapper>
-    )
-  }
-
-  return (
-    <SummaryWrapper>
-      {uniqueTokenCount} Token{uniqueTokenCount > 1 ? 's' : ''}
-    </SummaryWrapper>
+    <div className={css.wrapper}>
+      <div className={css.icon}>
+        <SvgIcon component={EditIcon} inheritViewBox fontSize="small" />
+      </div>
+      <div>
+        <Typography fontWeight={700}>Approve access to</Typography>
+        <Typography variant="body2">
+          This allows contracts to spend the selected amounts of your asset balance.
+        </Typography>
+      </div>
+    </div>
   )
 }
 
 export const ApprovalEditor = ({
   safeTransaction,
-  updateTransaction,
+  safeMessage,
 }: {
-  safeTransaction: SafeTransaction | undefined
-  updateTransaction?: (txs: MetaTransactionData[]) => void
+  safeTransaction?: SafeTransaction
+  safeMessage?: EIP712TypedData
 }) => {
-  const [readableApprovals, error, loading] = useApprovalInfos(safeTransaction)
+  const { setSafeTx, setSafeTxError } = useContext(SafeTxContext)
+  const [readableApprovals, error, loading] = useApprovalInfos({ safeTransaction, safeMessage })
 
-  if (!readableApprovals || readableApprovals.length === 0 || !safeTransaction) {
+  const nonZeroApprovals = readableApprovals?.filter((approval) => !(0n === approval.amount))
+
+  if (nonZeroApprovals?.length === 0 || (!safeTransaction && !safeMessage)) {
     return null
   }
 
-  const extractedTxs = decodeSafeTxToBaseTransactions(safeTransaction)
+  const updateApprovals = (approvals: string[]) => {
+    if (!safeTransaction) {
+      return
+    }
+    const extractedTxs = decodeSafeTxToBaseTransactions(safeTransaction)
+    const updatedTxs = updateApprovalTxs(approvals, readableApprovals, extractedTxs)
 
-  // If a callback is handed in, we update the txs on change, otherwise a `undefined` callback will change the form to readonly
-  const updateApprovals =
-    updateTransaction === undefined
-      ? undefined
-      : (approvals: string[]) => {
-          const updatedTxs = updateApprovalTxs(approvals, readableApprovals, extractedTxs)
-          updateTransaction(updatedTxs)
-        }
+    const createSafeTx = async (): Promise<SafeTransaction> => {
+      const isMultiSend = updatedTxs.length > 1
+      return isMultiSend ? createMultiSendCallOnlyTx(updatedTxs) : createTx(updatedTxs[0])
+    }
+
+    createSafeTx().then(setSafeTx).catch(setSafeTxError)
+  }
+
+  const isReadOnly = (safeTransaction && safeTransaction.signatures.size > 0) || safeMessage !== undefined
 
   return (
-    <Accordion className={css.warningAccordion} disabled={loading} defaultExpanded={true}>
-      <AccordionSummary
-        expandIcon={
-          <IconButton size="small">
-            <ExpandMoreIcon />
-          </IconButton>
-        }
-      >
-        {' '}
-        {error ? (
-          <Typography>Error while decoding approval transactions.</Typography>
-        ) : loading || !readableApprovals ? (
-          <Skeleton />
-        ) : (
-          <Summary approvalInfos={readableApprovals} />
-        )}
-      </AccordionSummary>
-      <AccordionDetails sx={{ pb: 0 }}>
-        {loading || !readableApprovals ? null : (
-          <>
-            <Typography fontSize="14px">
-              This allows contracts to spend the selected amounts of your asset balance.
-            </Typography>
-            <ApprovalEditorForm approvalInfos={readableApprovals} updateApprovals={updateApprovals} />
-          </>
-        )}
-      </AccordionDetails>
-    </Accordion>
+    <Box display="flex" flexDirection="column" gap={2} mb={3}>
+      <Title />
+      {error ? (
+        <Alert severity="error">Error while decoding approval transactions.</Alert>
+      ) : loading || !readableApprovals ? (
+        <Skeleton variant="rounded" height={100} data-testid="approval-editor-loading" />
+      ) : isReadOnly ? (
+        <Approvals approvalInfos={readableApprovals} />
+      ) : (
+        <ApprovalEditorForm approvalInfos={readableApprovals} updateApprovals={updateApprovals} />
+      )}
+
+      <Box mt={2}>
+        <Divider className={commonCss.nestedDivider} />
+      </Box>
+    </Box>
   )
 }
 

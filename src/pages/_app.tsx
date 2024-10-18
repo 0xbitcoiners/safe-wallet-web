@@ -1,17 +1,20 @@
-import Sentry from '@/services/sentry' // needs to be imported first
+import { SentryErrorBoundary } from '@/services/sentry' // needs to be imported first
+import useRehydrateSocialWallet from '@/hooks/wallets/mpc/useRehydrateSocialWallet'
+import PasswordRecoveryModal from '@/services/mpc/PasswordRecoveryModal'
 import type { ReactNode } from 'react'
 import { type ReactElement } from 'react'
 import { type AppProps } from 'next/app'
 import Head from 'next/head'
+import { Provider } from 'react-redux'
 import CssBaseline from '@mui/material/CssBaseline'
 import type { Theme } from '@mui/material/styles'
 import { ThemeProvider } from '@mui/material/styles'
 import { setBaseUrl as setGatewayBaseUrl } from '@safe-global/safe-gateway-typescript-sdk'
 import { CacheProvider, type EmotionCache } from '@emotion/react'
-import { SafeThemeProvider } from '@safe-global/safe-react-components'
+import SafeThemeProvider from '@/components/theme/SafeThemeProvider'
 import '@/styles/globals.css'
 import { IS_PRODUCTION, GATEWAY_URL_STAGING, GATEWAY_URL_PRODUCTION } from '@/config/constants'
-import { StoreHydrator } from '@/store'
+import { makeStore, useHydrateStore } from '@/store'
 import PageLayout from '@/components/common/PageLayout'
 import useLoadableStores from '@/hooks/useLoadableStores'
 import { useInitOnboard } from '@/hooks/wallets/useOnboard'
@@ -28,7 +31,7 @@ import { cgwDebugStorage } from '@/components/sidebar/DebugToggle'
 import { useTxTracking } from '@/hooks/useTxTracking'
 import { useSafeMsgTracking } from '@/hooks/messages/useSafeMsgTracking'
 import useGtm from '@/services/analytics/useGtm'
-import useBeamer from '@/hooks/useBeamer'
+import useBeamer from '@/hooks/Beamer/useBeamer'
 import ErrorBoundary from '@/components/common/ErrorBoundary'
 import createEmotionCache from '@/utils/createEmotionCache'
 import MetaTags from '@/components/common/MetaTags'
@@ -36,13 +39,22 @@ import useAdjustUrl from '@/hooks/useAdjustUrl'
 import useSafeMessageNotifications from '@/hooks/messages/useSafeMessageNotifications'
 import useSafeMessagePendingStatuses from '@/hooks/messages/useSafeMessagePendingStatuses'
 import useChangedValue from '@/hooks/useChangedValue'
+import { TxModalProvider } from '@/components/tx-flow'
+import { useNotificationTracking } from '@/components/settings/PushNotifications/hooks/useNotificationTracking'
+import Recovery from '@/features/recovery/components/Recovery'
+import WalletProvider from '@/components/common/WalletProvider'
+import CounterfactualHooks from '@/features/counterfactual/CounterfactualHooks'
 
 const GATEWAY_URL = IS_PRODUCTION || cgwDebugStorage.get() ? GATEWAY_URL_PRODUCTION : GATEWAY_URL_STAGING
 
+const reduxStore = makeStore()
+
 const InitApp = (): null => {
   setGatewayBaseUrl(GATEWAY_URL)
+  useHydrateStore(reduxStore)
   useAdjustUrl()
   useGtm()
+  useNotificationTracking()
   useInitSession()
   useLoadableStores()
   useInitOnboard()
@@ -56,6 +68,7 @@ const InitApp = (): null => {
   useTxTracking()
   useSafeMsgTracking()
   useBeamer()
+  useRehydrateSocialWallet()
 
   return null
 }
@@ -71,9 +84,11 @@ export const AppProviders = ({ children }: { children: ReactNode | ReactNode[] }
     <SafeThemeProvider mode={themeMode}>
       {(safeTheme: Theme) => (
         <ThemeProvider theme={safeTheme}>
-          <Sentry.ErrorBoundary showDialog fallback={ErrorBoundary}>
-            {children}
-          </Sentry.ErrorBoundary>
+          <SentryErrorBoundary showDialog fallback={ErrorBoundary}>
+            <WalletProvider>
+              <TxModalProvider>{children}</TxModalProvider>
+            </WalletProvider>
+          </SentryErrorBoundary>
         </ThemeProvider>
       )}
     </SafeThemeProvider>
@@ -93,7 +108,7 @@ const WebCoreApp = ({
   const safeKey = useChangedValue(router.query.safe?.toString())
 
   return (
-    <StoreHydrator>
+    <Provider store={reduxStore}>
       <Head>
         <title key="default-title">{'Safe{Wallet}'}</title>
         <MetaTags prefetchUrl={GATEWAY_URL} />
@@ -112,9 +127,15 @@ const WebCoreApp = ({
           <CookieBanner />
 
           <Notifications />
+
+          <PasswordRecoveryModal />
+
+          <Recovery />
+
+          <CounterfactualHooks />
         </AppProviders>
       </CacheProvider>
-    </StoreHydrator>
+    </Provider>
   )
 }
 

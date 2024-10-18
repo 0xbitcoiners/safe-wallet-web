@@ -1,160 +1,87 @@
-const SAFE = 'gor:0x97d314157727D517A706B5D08507A1f9B44AaaE9'
+import * as constants from '../../support/constants'
+import * as main from '../pages/main.page'
+import * as createTx from '../pages/create_tx.pages'
+import * as data from '../../fixtures/txhistory_data_data.json'
 
-const INCOMING = 'Received'
-const OUTGOING = 'Sent'
-const CONTRACT_INTERACTION = 'Contract interaction'
+const typeOnchainRejection = data.type.onchainRejection
+const typeBatch = data.type.batchNativeTransfer
+const typeReceive = data.type.receive
+const typeSend = data.type.send
+const typeDeleteAllowance = data.type.deleteSpendingLimit
+const typeGeneral = data.type.general
+const typeUntrustedToken = data.type.untrustedReceivedToken
 
-describe('Transaction history', () => {
-  before(() => {
-    cy.useProdCGW()
-
-    // Go to the test Safe transaction history
-    cy.visit(`/transactions/history?safe=${SAFE}`)
-    cy.contains('button', 'Accept selection').click()
+describe('[SMOKE] Tx history tests', () => {
+  beforeEach(() => {
+    cy.clearLocalStorage()
+    cy.visit(constants.transactionsHistoryUrl + constants.SEPOLIA_TEST_SAFE_8)
+    main.acceptCookies()
   })
 
-  it('should display October 9th transactions', () => {
-    const DATE = 'Oct 9, 2022'
-    const NEXT_DATE_LABEL = 'Feb 8, 2022'
-
-    // Date label
-    cy.contains('div', DATE).should('exist')
-
-    // Next date label
-    cy.contains('div', NEXT_DATE_LABEL).scrollIntoView()
-
-    // Transaction summaries from October 9th
-    const rows = cy.contains('div', DATE).nextUntil(`div:contains(${NEXT_DATE_LABEL})`)
-
-    rows.should('have.length', 19)
-
-    rows
-      // Receive 0.25 GOR
-      .last()
-      .within(() => {
-        // Type
-        cy.get('iframe').should('have.attr', 'title', INCOMING)
-        cy.contains('div', 'Received').should('exist')
-
-        // Info
-        cy.get('img[alt="GOR"]').should('be.visible')
-        cy.contains('span', '0.25 GOR').should('exist')
-
-        // Time
-        cy.contains('span', '4:56 PM').should('exist')
-
-        // Status
-        cy.contains('span', 'Success').should('exist')
-      })
-      // CowSwap deposit of Wrapped Ether
-      .prev()
-      .within(() => {
-        // Nonce
-        cy.contains('0')
-
-        // Type
-        // TODO: update next line after fixing the logo
-        // cy.find('img').should('have.attr', 'src').should('include', WRAPPED_ETH)
-        cy.contains('div', 'Wrapped Ether').should('exist')
-
-        // Info
-        cy.contains('div', 'deposit').should('exist')
-
-        // Time
-        cy.contains('span', '4:59 PM').should('exist')
-
-        // Status
-        cy.contains('span', 'Success').should('exist')
-      })
-      // CowSwap approval of Wrapped Ether
-      .prev()
-      .within(() => {
-        // Nonce
-        cy.contains('1')
-
-        // Type
-        // TODO: update next line after fixing the logo
-        // cy.find('img').should('have.attr', 'src').should('include', WRAPPED_ETH)
-        cy.contains('div', 'Wrapped Ether').should('exist')
-
-        // Info
-        cy.contains('div', 'approve').should('exist')
-
-        // Time
-        cy.contains('span', '5:00 PM').should('exist')
-
-        // Status
-        cy.contains('span', 'Success').should('exist')
-      })
-      // Contract interaction
-      .prev()
-      .within(() => {
-        // Nonce
-        cy.contains('2')
-
-        // Type
-        cy.contains('div', 'Contract interaction').should('exist')
-
-        // Time
-        cy.contains('span', '5:01 PM').should('exist')
-
-        // Status
-        cy.contains('span', 'Success').should('exist')
-      })
-      // Send 0.11 WETH
-      .prev()
-      .within(() => {
-        // Type
-        cy.get('iframe').should('have.attr', 'title', OUTGOING)
-        cy.contains('div', 'Sent').should('exist')
-
-        // Info
-        cy.contains('span', '-0.11 WETH').should('exist')
-
-        // Time
-        cy.contains('span', '5:01 PM').should('exist')
-
-        // Status
-        cy.contains('span', 'Success').should('exist')
-      })
-      // Receive 120 DAI
-      .prev()
-      .within(() => {
-        // Type
-        cy.contains('div', 'Received').should('exist')
-
-        // Info
-        cy.contains('span', '120,497.61 DAI').should('exist')
-
-        // Time
-        cy.contains('span', '5:01 PM').should('exist')
-
-        // Status
-        cy.contains('span', 'Success').should('exist')
-      })
+  // Token receipt
+  it('[SMOKE] Verify summary for token receipt', () => {
+    createTx.verifySummaryByName(
+      typeReceive.summaryTitle,
+      typeReceive.summaryTxInfo,
+      [typeReceive.summaryTxInfo, typeGeneral.statusOk],
+      typeReceive.altTmage,
+    )
   })
 
-  it('should expand/collapse all actions', () => {
-    // Open the tx details
-    cy.contains('div', 'Mar 24, 2023')
-      .next()
-      .click()
-      .within(() => {
-        cy.contains('True').should('not.be.visible')
-        cy.contains('1337').should('not.be.visible')
-        cy.contains('5688').should('not.be.visible')
-        cy.contains('Expand all').click()
+  it('[SMOKE] Verify exapanded details for token receipt', () => {
+    createTx.clickOnTransactionItemByName(typeReceive.summaryTitle, typeReceive.summaryTxInfo)
+    createTx.verifyExpandedDetails([
+      typeReceive.title,
+      typeReceive.receivedFrom,
+      typeReceive.senderAddress,
+      typeReceive.transactionHash,
+    ])
+  })
 
-        // All the values in the actions must be visible
-        cy.contains('True').should('exist')
-        cy.contains('1337').should('exist')
-        cy.contains('5688').should('exist')
+  it('[SMOKE] Verify summary for token send', () => {
+    createTx.verifySummaryByName(
+      typeSend.title,
+      [typeSend.summaryTxInfo, typeGeneral.statusOk],
+      typeSend.altImage,
+      typeSend.altToken,
+    )
+  })
 
-        // After collapse all the same values should not be visible
-        cy.contains('Collapse all').click()
-        cy.contains('True').should('not.be.visible')
-        cy.contains('1337').should('not.be.visible')
-        cy.contains('5688').should('not.be.visible')
-      })
+  it('[SMOKE] Verify summary for on-chain rejection', () => {
+    createTx.verifySummaryByName(typeOnchainRejection.title, [typeGeneral.statusOk], typeOnchainRejection.altImage)
+  })
+
+  it('[SMOKE] Verify summary for batch', () => {
+    createTx.verifySummaryByName(
+      typeBatch.title,
+      typeBatch.summaryTxInfo,
+      [typeBatch.summaryTxInfo, typeGeneral.statusOk],
+      typeBatch.altImage,
+    )
+  })
+
+  it('[SMOKE] Verify summary for allowance deletion', () => {
+    createTx.verifySummaryByName(
+      typeDeleteAllowance.title,
+      typeDeleteAllowance.summaryTxInfo,
+      [typeDeleteAllowance.summaryTxInfo, typeGeneral.statusOk],
+      typeDeleteAllowance.altImage,
+    )
+  })
+
+  it('[SMOKE] Verify summary for untrusted token', () => {
+    createTx.verifySummaryByName(
+      typeUntrustedToken.summaryTitle,
+      typeUntrustedToken.summaryTxInfo,
+      [typeUntrustedToken.summaryTxInfo, typeGeneral.statusOk],
+      typeUntrustedToken.altImage,
+    )
+    createTx.verifySpamIconIsDisplayed(typeUntrustedToken.title, typeUntrustedToken.summaryTxInfo)
+  })
+
+  it('[SMOKE] Verify that copying sender address of untrusted token shows warning popup', () => {
+    createTx.clickOnTransactionItemByName(typeUntrustedToken.summaryTitle, typeUntrustedToken.summaryTxInfo)
+    createTx.clickOnCopyBtn(0)
+    createTx.verifyWarningModalVisible()
   })
 })

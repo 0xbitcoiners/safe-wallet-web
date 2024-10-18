@@ -14,25 +14,38 @@ import useChainId from '@/hooks/useChainId'
 import SafeLogo from '@/public/images/logo.svg'
 import Link from 'next/link'
 import useSafeAddress from '@/hooks/useSafeAddress'
+import BatchIndicator from '@/components/batch/BatchIndicator'
+import WalletConnect from '@/features/walletconnect/components'
+import { PushNotificationsBanner } from '@/components/settings/PushNotifications/PushNotificationsBanner'
+import { FEATURES } from '@/utils/chains'
+import { useHasFeature } from '@/hooks/useChains'
 
 type HeaderProps = {
   onMenuToggle?: Dispatch<SetStateAction<boolean>>
+  onBatchToggle?: Dispatch<SetStateAction<boolean>>
 }
 
-const Header = ({ onMenuToggle }: HeaderProps): ReactElement => {
+const Header = ({ onMenuToggle, onBatchToggle }: HeaderProps): ReactElement => {
   const chainId = useChainId()
   const safeAddress = useSafeAddress()
   const showSafeToken = safeAddress && !!getSafeTokenAddress(chainId)
   const router = useRouter()
+  const enableWc = useHasFeature(FEATURES.NATIVE_WALLETCONNECT)
 
   // Logo link: if on Dashboard, link to Welcome, otherwise to the root (which redirects to either Dashboard or Welcome)
-  const logoHref = router.pathname === AppRoutes.home ? AppRoutes.welcome : AppRoutes.index
+  const logoHref = router.pathname === AppRoutes.home ? AppRoutes.welcome.index : AppRoutes.index
 
   const handleMenuToggle = () => {
     if (onMenuToggle) {
       onMenuToggle((isOpen) => !isOpen)
     } else {
       router.push(logoHref)
+    }
+  }
+
+  const handleBatchToggle = () => {
+    if (onBatchToggle) {
+      onBatchToggle((isOpen) => !isOpen)
     }
   }
 
@@ -46,9 +59,7 @@ const Header = ({ onMenuToggle }: HeaderProps): ReactElement => {
 
       <div className={classnames(css.element, css.hideMobile, css.logo)}>
         <Link href={logoHref} passHref>
-          <a>
-            <SafeLogo alt="Safe logo" />
-          </a>
+          <SafeLogo alt="Safe logo" />
         </Link>
       </div>
 
@@ -58,9 +69,23 @@ const Header = ({ onMenuToggle }: HeaderProps): ReactElement => {
         </div>
       )}
 
-      <div className={classnames(css.element, css.hideMobile)}>
-        <NotificationCenter />
+      <div className={css.element}>
+        <PushNotificationsBanner>
+          <NotificationCenter />
+        </PushNotificationsBanner>
       </div>
+
+      {safeAddress && (
+        <div className={classnames(css.element, css.hideMobile)}>
+          <BatchIndicator onClick={handleBatchToggle} />
+        </div>
+      )}
+
+      {enableWc && (
+        <div className={classnames(css.element, css.hideMobile)}>
+          <WalletConnect />
+        </div>
+      )}
 
       <div className={classnames(css.element, css.connectWallet)}>
         <ConnectWallet />

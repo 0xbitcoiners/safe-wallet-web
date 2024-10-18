@@ -11,12 +11,14 @@ import ShareIcon from '@/public/images/common/share.svg'
 import BookmarkIcon from '@/public/images/apps/bookmark.svg'
 import BookmarkedIcon from '@/public/images/apps/bookmarked.svg'
 import DeleteIcon from '@/public/images/common/delete.svg'
+import InfoIcon from '@/public/images/notifications/info.svg'
 
 type SafeAppActionButtonsProps = {
   safeApp: SafeAppData
   isBookmarked?: boolean
   onBookmarkSafeApp?: (safeAppId: number) => void
   removeCustomApp?: (safeApp: SafeAppData) => void
+  openPreviewDrawer?: (safeApp: SafeAppData) => void
 }
 
 const SafeAppActionButtons = ({
@@ -24,6 +26,7 @@ const SafeAppActionButtons = ({
   isBookmarked,
   onBookmarkSafeApp,
   removeCustomApp,
+  openPreviewDrawer,
 }: SafeAppActionButtonsProps) => {
   const isCustomApp = safeApp.id < 1
   const shareSafeAppUrl = useShareSafeAppUrl(safeApp.url)
@@ -34,14 +37,30 @@ const SafeAppActionButtons = ({
   }
 
   return (
-    <Box display="flex" gap={1}>
+    <Box display="flex" gap={1} alignItems="center">
+      {/* Open the preview drawer */}
+      {openPreviewDrawer && (
+        <IconButton
+          size="small"
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            openPreviewDrawer(safeApp)
+          }}
+        >
+          <SvgIcon component={InfoIcon} inheritViewBox color="border" fontSize="small" />
+        </IconButton>
+      )}
+
       {/* Copy share Safe App url button */}
       <CopyButton
         initialToolTipText={`Copy share URL for ${safeApp.name}`}
         onCopy={handleCopyShareSafeAppUrl}
         text={shareSafeAppUrl}
       >
-        <SvgIcon component={ShareIcon} inheritViewBox color="border" fontSize="small" />
+        <IconButton data-testid="copy-btn-icon" size="small">
+          <SvgIcon component={ShareIcon} inheritViewBox color="border" fontSize="small" />
+        </IconButton>
       </CopyButton>
 
       {/* Bookmark Safe App button */}
@@ -76,7 +95,7 @@ const SafeAppActionButtons = ({
               removeCustomApp(safeApp)
             }}
           >
-            <SvgIcon component={DeleteIcon} inheritViewBox fontSize="small" />
+            <SvgIcon component={DeleteIcon} inheritViewBox fontSize="small" color="border" />
           </IconButton>
         </Tooltip>
       )}

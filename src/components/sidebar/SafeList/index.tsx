@@ -14,7 +14,7 @@ import { Link as MuiLink } from '@mui/material'
 import { type ChainInfo } from '@safe-global/safe-gateway-typescript-sdk'
 
 import AddIcon from '@/public/images/common/add.svg'
-import useChains from '@/hooks/useChains'
+import useChains, { useCurrentChain } from '@/hooks/useChains'
 import useOwnedSafes from '@/hooks/useOwnedSafes'
 import useChainId from '@/hooks/useChainId'
 import { useAppSelector } from '@/store'
@@ -67,6 +67,7 @@ const NO_SAFE_MESSAGE = 'Create a new Safe Account or add'
 const SafeList = ({ closeDrawer }: { closeDrawer?: () => void }): ReactElement => {
   const router = useRouter()
   const chainId = useChainId()
+  const currentChain = useCurrentChain()
   const { safeAddress, safe } = useSafeInfo()
   const { configs } = useChains()
   const ownedSafes = useOwnedSafes()
@@ -81,7 +82,7 @@ const SafeList = ({ closeDrawer }: { closeDrawer?: () => void }): ReactElement =
 
   const hasWallet = !!wallet
   const hasNoSafes = Object.keys(ownedSafes).length === 0 && Object.keys(addedSafes).length === 0
-  const isWelcomePage = router.pathname === AppRoutes.welcome
+  const isWelcomePage = router.pathname === AppRoutes.welcome.index || router.pathname === AppRoutes.welcome.socialLogin
   const isSingleTxPage = router.pathname === AppRoutes.transactions.tx
 
   /**
@@ -100,7 +101,7 @@ const SafeList = ({ closeDrawer }: { closeDrawer?: () => void }): ReactElement =
   )
 
   return (
-    <div className={css.container}>
+    <div data-testid="sidebar-safe-container">
       <div className={css.header}>
         <Typography variant="h4" display="inline" fontWeight={700}>
           My Safe Accounts
@@ -108,7 +109,11 @@ const SafeList = ({ closeDrawer }: { closeDrawer?: () => void }): ReactElement =
 
         {!isWelcomePage && (
           <Track {...OVERVIEW_EVENTS.ADD_SAFE}>
-            <Link href={{ pathname: AppRoutes.welcome }} passHref>
+            <Link
+              href={{ pathname: AppRoutes.welcome.index, query: { chain: currentChain?.shortName } }}
+              passHref
+              legacyBehavior
+            >
               <Button
                 disableElevation
                 size="small"
@@ -131,7 +136,7 @@ const SafeList = ({ closeDrawer }: { closeDrawer?: () => void }): ReactElement =
 
               <Typography variant="body2" color="primary.light" textAlign="center" mt={3}>
                 {!isWelcomePage ? (
-                  <Link href={{ pathname: AppRoutes.welcome, query: router.query }} passHref>
+                  <Link href={{ pathname: AppRoutes.welcome.index, query: router.query }} passHref legacyBehavior>
                     <MuiLink onClick={closeDrawer}>{NO_SAFE_MESSAGE}</MuiLink>
                   </Link>
                 ) : (
@@ -143,7 +148,7 @@ const SafeList = ({ closeDrawer }: { closeDrawer?: () => void }): ReactElement =
           ) : (
             <Box display="flex" flexDirection="column" alignItems="center" gap={3} maxWidth={250}>
               <Box display="flex" alignItems="center" justifyContent="center">
-                <KeyholeIcon />
+                <KeyholeIcon size={40} />
               </Box>
 
               <Typography variant="body2" color="primary.light" textAlign="center" sx={{ textWrap: 'balance' }}>
@@ -182,13 +187,13 @@ const SafeList = ({ closeDrawer }: { closeDrawer?: () => void }): ReactElement =
           return (
             <Fragment key={chain.chainName}>
               {/* Chain indicator */}
-              <ChainIndicator chainId={chain.chainId} className={css.chainDivider} />
+              <ChainIndicator chainId={chain.chainId} className={css.chainDivider} showLogo={false} />
 
               {/* No Safes yet */}
               {!addedSafeEntriesOnChain.length && !ownedSafesOnChain.length && (
                 <Typography variant="body2" color="primary.light" p={2} textAlign="center">
                   {!isWelcomePage ? (
-                    <Link href={{ pathname: AppRoutes.welcome, query: router.query }} passHref>
+                    <Link href={{ pathname: AppRoutes.welcome.index, query: router.query }} passHref legacyBehavior>
                       <MuiLink onClick={closeDrawer}>{NO_SAFE_MESSAGE}</MuiLink>
                     </Link>
                   ) : (

@@ -1,71 +1,103 @@
 import 'cypress-file-upload'
-const path = require('path')
-import { format } from 'date-fns'
+import * as file from '../pages/import_export.pages'
+import * as main from '../pages/main.page'
+import * as constants from '../../support/constants'
+import * as ls from '../../support/localstorage_data.js'
+import * as createwallet from '../pages/create_wallet.pages'
 
-describe('Import Export Data', () => {
-  before(() => {
-    cy.visit(`/welcome`)
-    cy.contains('Accept selection').click()
-    // Waits for the Import button to be visible
-    cy.contains('button', 'Import').should('be.visible')
-  })
-
-  it('Uploads test file and access safe', () => {
-    cy.contains('button', 'Import').click()
-    //Uploads the file
-    cy.get('[type="file"]').attachFile('../fixtures/data_import.json')
-    //verifies that the modal says the amount of chains/addressbook values it uploaded
-    cy.contains('Added Safe Accounts on 3 chains').should('be.visible')
-    cy.contains('Address book for 3 chains').should('be.visible')
-    cy.contains('Settings').should('be.visible')
-    cy.contains('Bookmarked Safe Apps').should('be.visible')
-    cy.contains('Data import').parent().contains('button', 'Import').click()
-    //Click in one of the imported safes
-    cy.contains('safe 1 goerli').click()
-  })
-
-  it("Verify safe's address book imported data", () => {
-    //Verifies imported owners in the Address book
-    cy.contains('Address book').click()
-    cy.get('tbody tr:nth-child(1) td:nth-child(1)').contains('test1')
-    cy.get('tbody tr:nth-child(1) td:nth-child(2)').contains('0x61a0c717d18232711bC788F19C9Cd56a43cc8872')
-    cy.get('tbody tr:nth-child(2) td:nth-child(1)').contains('test2')
-    cy.get('tbody tr:nth-child(2) td:nth-child(2)').contains('0x7724b234c9099C205F03b458944942bcEBA13408')
-  })
-
-  it('Verify pinned apps', () => {
-    cy.get('aside').contains('li', 'Apps').click()
-    cy.contains('Bookmarked apps').click()
-    //Takes a some time to load the apps page, It waits for bookmark to be lighted up
-    cy.waitForSelector(() => {
-      return cy
-        .get('[aria-selected="true"] p')
-        .invoke('html')
-        .then((text) => text === 'Bookmarked apps')
+describe('[SMOKE] Import Export Data tests', () => {
+  beforeEach(() => {
+    cy.clearLocalStorage()
+    cy.visit(constants.dataSettingsUrl).then(() => {
+      main.acceptCookies()
+      createwallet.selectNetwork(constants.networks.sepolia)
     })
-    cy.contains('Drain Account').should('be.visible')
-    cy.contains('Transaction Builder').should('be.visible')
   })
 
-  it('Verify imported data in settings', () => {
-    //In the settings checks the checkboxes and darkmode enabled
-    cy.contains('Settings').click()
-    cy.contains('Appearance').click()
-    cy.contains('label', 'Prepend chain prefix to addresses').find('input[type="checkbox"]').should('not.be.checked')
-    cy.contains('label', 'Copy addresses with chain prefix').find('input[type="checkbox"]').should('not.be.checked')
-    cy.get('main').contains('label', 'Dark mode').find('input[type="checkbox"]').should('be.checked')
+  it('[SMOKE] Verify Safe can be accessed after test file upload', () => {
+    const safe = constants.SEPOLIA_CSV_ENTRY.name
+
+    main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__addedSafes, ls.addedSafes.set1).then(() => {
+      main
+        .addToLocalStorage(constants.localStorageKeys.SAFE_v2__addressBook, ls.addressBookData.importedSafe)
+        .then(() => {
+          cy.visit(constants.welcomeUrl)
+          file.clickOnOpenSafeListSidebar()
+          file.clickOnImportedSafe(safe)
+        })
+    })
   })
 
-  it('Verifies data for export in Data tab', () => {
-    cy.contains('div[role="tablist"] a', 'Data').click()
-    cy.contains('Added Safe Accounts on 3 chains').should('be.visible')
-    cy.contains('Address book for 3 chains').should('be.visible')
-    cy.contains('Bookmarked Safe Apps').should('be.visible')
-    const date = format(new Date(), 'yyyy-MM-dd', { timeZone: 'UTC' })
-    const fileName = `safe-${date}.json`
-    cy.contains('div', fileName).next().click()
-    const downloadsFolder = Cypress.config('downloadsFolder')
-    //File reading is failing in the CI. Can be tested locally
-    cy.readFile(path.join(downloadsFolder, fileName)).should('exist')
+  it('[SMOKE] Verify address book imported data', () => {
+    main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__addedSafes, ls.addedSafes.set1).then(() => {
+      main
+        .addToLocalStorage(constants.localStorageKeys.SAFE_v2__addressBook, ls.addressBookData.importedSafe)
+        .then(() => {
+          cy.visit(constants.addressBookUrl + constants.SEPOLIA_TEST_SAFE_3)
+          file.verifyImportedAddressBookData()
+        })
+    })
+  })
+
+  it('[SMOKE] Verify pinned apps', () => {
+    const appNames = ['Transaction Builder']
+
+    cy.visit(constants.appsUrlGeneral + constants.SEPOLIA_TEST_SAFE_3).then(() => {
+      main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__addedSafes, ls.addedSafes.set1).then(() => {
+        main
+          .addToLocalStorage(constants.localStorageKeys.SAFE_v2__addressBook, ls.addressBookData.importedSafe)
+          .then(() => {
+            main
+              .addToLocalStorage(constants.localStorageKeys.SAFE_v2__safeApps, ls.pinnedApps.transactionBuilder)
+              .then(() => {
+                cy.reload().then(() => {
+                  file.verifyPinnedApps(appNames)
+                })
+              })
+          })
+      })
+    })
+  })
+
+  it('[SMOKE] Verify imported data in settings', () => {
+    const unchecked = [file.prependChainPrefixStr, file.copyAddressStr]
+    const checked = [file.darkModeStr]
+
+    cy.visit(constants.setupUrl + constants.SEPOLIA_TEST_SAFE_3).then(() => {
+      main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__settings, ls.safeSettings.settings1).then(() => {
+        main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__safeApps, ls.pinnedApps.transactionBuilder).then
+        main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__addedSafes, ls.addedSafes.set1).then(() => {
+          main
+            .addToLocalStorage(constants.localStorageKeys.SAFE_v2__addressBook, ls.addressBookData.importedSafe)
+            .then(() => {
+              cy.reload()
+              file.clickOnAppearenceBtn()
+              file.verifyCheckboxes(unchecked)
+              file.verifyCheckboxes(checked, true)
+            })
+        })
+      })
+    })
+  })
+
+  it('[SMOKE] Verify data for export in Data tab', () => {
+    cy.visit(constants.setupUrl + constants.SEPOLIA_TEST_SAFE_3).then(() => {
+      main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__settings, ls.safeSettings.settings1).then(() => {
+        main.addToLocalStorage(constants.localStorageKeys.SAFE_v2__addedSafes, ls.addedSafes.set1).then(() => {
+          main
+            .addToLocalStorage(constants.localStorageKeys.SAFE_v2__safeApps, ls.pinnedApps.transactionBuilder)
+            .then(() => {
+              main
+                .addToLocalStorage(constants.localStorageKeys.SAFE_v2__addressBook, ls.addressBookData.importedSafe)
+                .then(() => {
+                  cy.reload()
+                  file.clickOnDataTab()
+                  file.verifyImportModalData()
+                  file.verifyFileDownload()
+                })
+            })
+        })
+      })
+    })
   })
 })
